@@ -115,8 +115,6 @@
       });
 
       pageInput.value = num;
-      
-      // FITUR BARU: Simpan halaman aktif ke memori lokal secara otomatis
       localStorage.setItem('hazi_reader_last_page', num);
     }
 
@@ -153,8 +151,9 @@
       }
     });
 
+    // Otomatis memuat file a.pdf (Bypass Cache Server Vercel)
     window.addEventListener('DOMContentLoaded', () => {
-      const url = './a.pdf';
+      const url = './a.pdf?v=' + Math.random();
 
       pdfjsLib.getDocument(url).promise.then((pdfDoc_) => {
         pdfDoc = pdfDoc_;
@@ -169,7 +168,6 @@
         document.getElementById('next-page').disabled = false;
         pageInput.disabled = false;
         
-        // FITUR BARU: Cek apakah ada riwayat membaca sebelumnya
         const savedPage = localStorage.getItem('hazi_reader_last_page');
         if (savedPage && parseInt(savedPage) <= pdfDoc.numPages) {
           pageNum = parseInt(savedPage);
@@ -180,7 +178,7 @@
         renderPage(pageNum);
       }).catch(err => {
         document.getElementById('loading-status').textContent = "Gagal memuat a.pdf";
-        console.error("Pastikan file bernama a.pdf sudah ditaruh di folder utama.", err);
+        console.error("Detail Error PDF.js:", err);
       });
     });
 
