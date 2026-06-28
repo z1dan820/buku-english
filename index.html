@@ -43,14 +43,34 @@
       <span class="text-amber-400 font-bold text-lg tracking-wide">HAZI</span>
       <span class="text-xs bg-gray-800 px-2 py-0.5 rounded border border-gray-700 text-gray-400">READER</span>
     </div>
-    <div id="loading-status" class="text-xs text-amber-400/80 animate-pulse">Memuat buku...</div>
+    <div class="flex items-center gap-2">
+      <button id="btn-library" class="bg-gray-800 hover:bg-gray-700 text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-700 flex items-center gap-1 transition active:scale-95">
+        📚 Koleksi
+      </button>
+      <div id="loading-status" class="text-xs text-amber-400/80">Siapkan bacaanmu</div>
+    </div>
   </header>
 
-  <main class="flex-1 w-full bg-[#151518] overflow-auto custom-scroll relative flex justify-center items-start p-2" id="view-container">
-    <canvas id="pdf-canvas" class="shadow-2xl hidden mb-20"></canvas>
+  <main class="flex-1 w-full bg-[#151518] overflow-auto custom-scroll relative p-4 flex flex-col items-center" id="view-container">
+    
+    <div id="library-view" class="w-full max-w-md mx-auto mt-4">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-lg font-bold text-gray-300">Daftar Ebook Anda</h2>
+        <label class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-xl text-xs cursor-pointer shadow-lg transition active:scale-95 flex items-center gap-1">
+          ➕ Tambah PDF
+          <input type="file" id="file-selector" accept=".pdf" class="hidden">
+        </label>
+      </div>
+
+      <div id="book-list" class="space-y-3">
+        <div id="empty-state" class="text-center text-sm text-gray-500 py-10">Belum ada koleksi buku. Silakan tambah PDF baru dari HP Anda.</div>
+      </div>
+    </div>
+
+    <canvas id="pdf-canvas" class="shadow-2xl hidden mb-20 mt-2"></canvas>
   </main>
 
-  <footer class="bg-[#1a1a1e]/95 backdrop-blur-md border-t border-gray-800 px-4 py-3 flex items-center justify-between z-10 shadow-lg pb-6">
+  <footer id="reader-controls" class="bg-[#1a1a1e]/95 backdrop-blur-md border-t border-gray-800 px-4 py-3 flex items-center justify-between z-10 shadow-lg pb-6 hidden">
     <button id="prev-page" class="p-2 text-gray-400 hover:text-amber-400 active:scale-95 transition disabled:opacity-30" disabled>
       <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
     </button>
@@ -73,27 +93,45 @@
         pageNum = 1,
         pageRendering = false,
         pageNumPending = null,
+        currentBookId = null,
         canvas = document.getElementById('pdf-canvas'),
         ctx = canvas.getContext('2d'),
-        pageInput = document.getElementById('page-num-input');
+        pageInput = document.getElementById('page-num-input'),
+        libraryView = document.getElementById('library-view'),
+        readerControls = document.getElementById('reader-controls'),
+        loadingStatus = document.getElementById('loading-status'),
+        bookListContainer = document.getElementById('book-list');
 
-    document.addEventListener('gesturestart', function (e) {
-      e.preventDefault();
-    });
+    // --- INISIALISASI INDEXEDDB ---
+    let db = null;
+    const dbRequest = indexedDB.open('HaziReaderDB', 1);
 
+    dbRequest.onupgradeneeded = (e) => {
+      db = e.target.result;
+      if (!db.objectStoreNames.contains('books')) {
+        db.createObjectStore('books', { keyPath: 'id', autoIncrement: true });
+      }
+    };
+
+    dbRequest.onsuccess = (e) => {
+      db = e.target.result;
+      renderLibrary(); // Muat daftar koleksi saat aplikasi dibuka
+    };
+
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+
+    // --- FITUR RENDER HALAMAN PDF ---
     function renderPage(num) {
       pageRendering = true;
       pdfDoc.getPage(num).then((page) => {
         const containerWidth = document.getElementById('view-container').clientWidth - 16; 
         const unscaledViewport = page.getViewport({ scale: 1 });
-        
         const baseScale = containerWidth / unscaledViewport.width;
         const outputScale = window.devicePixelRatio || 1;
         const viewport = page.getViewport({ scale: baseScale });
 
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
-        
         canvas.style.width = Math.floor(viewport.width) + "px";
         canvas.style.height = Math.floor(viewport.height) + "px";
 
@@ -101,11 +139,9 @@
           canvasContext: ctx,
           viewport: page.getViewport({ scale: baseScale * outputScale })
         };
-        
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         
-        const renderTask = page.render(renderContext);
-        renderTask.promise.then(() => {
+        page.render(renderContext).promise.then(() => {
           pageRendering = false;
           if (pageNumPending !== null) {
             renderPage(pageNumPending);
@@ -115,17 +151,17 @@
       });
 
       pageInput.value = num;
-      localStorage.setItem('hazi_reader_last_page', num);
-    }
-
-    function queueRenderPage(num) {
-      if (pageRendering) {
-        pageNumPending = num;
-      } else {
-        renderPage(num);
+      // Simpan halaman terakhir dibaca KHUSUS untuk ID buku ini
+      if (currentBookId) {
+        localStorage.setItem(`last_page_book_${currentBookId}`, num);
       }
     }
 
+    function queueRenderPage(num) {
+      if (pageRendering) { pageNumPending = num; } else { renderPage(num); }
+    }
+
+    // --- CONTROLLER NAVIGASI ---
     document.getElementById('prev-page').addEventListener('click', () => {
       if (pageNum <= 1) return;
       pageNum--;
@@ -151,37 +187,143 @@
       }
     });
 
-        // Memuat PDF via Jalur Rewrites Vercel (Lolos Blokir File Scan/Gambar Besar)
-    window.addEventListener('DOMContentLoaded', () => {
-      const url = './buku-pdf?v=' + Math.random();
+    // --- MANAJEMEN LIBRARY (SAVE/LOAD/DELETE) ---
+    
+    // Tambah Buku Baru ke HP
+    document.getElementById('file-selector').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file || file.type !== 'application/pdf') return;
 
-      pdfjsLib.getDocument(url).promise.then((pdfDoc_) => {
-        pdfDoc = pdfDoc_;
-        document.getElementById('page-count').textContent = pdfDoc.numPages;
-        pageInput.max = pdfDoc.numPages;
+      loadingStatus.textContent = "Menyimpan ke memori HP...";
+      
+      const fileReader = new FileReader();
+      fileReader.onload = function() {
+        const blobData = new Blob([this.result], { type: 'application/pdf' });
         
-        document.getElementById('loading-status').textContent = "Selamat Membaca";
-        document.getElementById('loading-status').classList.remove('animate-pulse');
-        canvas.classList.remove('hidden');
+        const transaction = db.transaction(['books'], 'readwrite');
+        const store = transaction.objectStore('books');
+        
+        const newBook = {
+          title: file.name.replace('.pdf', ''),
+          data: blobData,
+          addedAt: new Date().toLocaleDateString('id-ID')
+        };
 
-        document.getElementById('prev-page').disabled = false;
-        document.getElementById('next-page').disabled = false;
-        pageInput.disabled = false;
-        
-        const savedPage = localStorage.getItem('hazi_reader_last_page');
-        if (savedPage && parseInt(savedPage) <= pdfDoc.numPages) {
-          pageNum = parseInt(savedPage);
-        } else {
-          pageNum = 1;
-        }
-        
-        renderPage(pageNum);
-      }).catch(err => {
-        document.getElementById('loading-status').textContent = "Gagal memuat a.pdf";
-        console.error("Detail Error:", err);
-      });
+        store.add(newBook);
+
+        transaction.oncomplete = () => {
+          loadingStatus.textContent = "Buku berhasil disimpan!";
+          renderLibrary();
+        };
+      };
+      fileReader.readAsArrayBuffer(file);
     });
 
+    // Tampilkan Daftar Koleksi dari Penyimpanan HP
+    function renderLibrary() {
+      const transaction = db.transaction(['books'], 'readonly');
+      const store = transaction.objectStore('books');
+      const getAllRequest = store.getAll();
+
+      getAllRequest.onsuccess = () => {
+        const books = getAllRequest.result;
+        bookListContainer.innerHTML = '';
+
+        if (books.length === 0) {
+          bookListContainer.innerHTML = '<div class="text-center text-sm text-gray-500 py-10">Belum ada koleksi buku. Silakan tambah PDF baru dari HP Anda.</div>';
+          return;
+        }
+
+        books.forEach((book) => {
+          const lastSavedPage = localStorage.getItem(`last_page_book_${book.id}`) || 1;
+          
+          const item = document.createElement('div');
+          item.className = "bg-[#1a1a1e] border border-gray-800 p-4 rounded-xl flex items-center justify-between shadow-md gap-3";
+          item.innerHTML = `
+            <div class="flex-1 min-w-0 cursor-pointer" onclick="openBook(${book.id})">
+              <h3 class="font-bold text-amber-400 text-sm truncate">${book.title}</h3>
+              <p class="text-xs text-gray-500 mt-1">Halaman Terakhir: Hal ${lastSavedPage} • Ditambahkan: ${book.addedAt}</p>
+            </div>
+            <button onclick="deleteBook(${book.id})" class="text-gray-600 hover:text-red-500 p-1 transition active:scale-90">
+              🗑️
+            </button>
+          `;
+          bookListContainer.appendChild(item);
+        });
+      };
+    }
+
+    // Buka dan Baca Buku dari Koleksi
+    window.openBook = function(id) {
+      loadingStatus.textContent = "Membuka halaman...";
+      currentBookId = id;
+
+      const transaction = db.transaction(['books'], 'readonly');
+      const store = transaction.objectStore('books');
+      const getRequest = store.get(id);
+
+      getRequest.onsuccess = () => {
+        const book = getRequest.result;
+        
+        const fileReader = new FileReader();
+        fileReader.onload = function() {
+          const typedarray = new Uint8Array(this.result);
+
+          pdfjsLib.getDocument({ data: typedarray, disableAutoFetch: true, disableStream: true }).promise.then((pdfDoc_) => {
+            pdfDoc = pdfDoc_;
+            document.getElementById('page-count').textContent = pdfDoc.numPages;
+            pageInput.max = pdfDoc.numPages;
+            
+            loadingStatus.textContent = "Mode Membaca";
+            
+            // Sembunyikan Library, Tampilkan Modul Reader
+            libraryView.classList.add('hidden');
+            canvas.classList.remove('hidden');
+            readerControls.classList.remove('hidden');
+
+            document.getElementById('prev-page').disabled = false;
+            document.getElementById('next-page').disabled = false;
+            pageInput.disabled = false;
+            
+            // Set posisi halaman terakhir khusus buku ini
+            const savedPage = localStorage.getItem(`last_page_book_${id}`);
+            pageNum = (savedPage && parseInt(savedPage) <= pdfDoc.numPages) ? parseInt(savedPage) : 1;
+            
+            renderPage(pageNum);
+          });
+        };
+        fileReader.readAsArrayBuffer(book.data);
+      };
+    };
+
+    // Hapus Buku dari Koleksi HP
+    window.deleteBook = function(id) {
+      if (!confirm("Hapus buku ini dari penyimpanan HP?")) return;
+      
+      const transaction = db.transaction(['books'], 'readwrite');
+      const store = transaction.objectStore('books');
+      store.delete(id);
+
+      transaction.oncomplete = () => {
+        localStorage.removeItem(`last_page_book_${id}`);
+        renderLibrary();
+      };
+    };
+
+    // Tombol Kembali ke Menu Library Atas
+    document.getElementById('btn-library').addEventListener('click', () => {
+      currentBookId = null;
+      canvas.classList.add('hidden');
+      readerControls.classList.add('hidden');
+      libraryView.classList.remove('hidden');
+      loadingStatus.textContent = "Mode Koleksi";
+      renderLibrary(); // Refresh info halaman terakhir dibaca
+    });
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW Error:', err));
+      });
     }
   </script>
 </body>
