@@ -151,9 +151,9 @@
       }
     });
 
-    // Otomatis memuat file a.pdf (Bypass Cache Server Vercel)
+        // Memuat PDF via Jalur Rewrites Vercel (Lolos Blokir File Scan/Gambar Besar)
     window.addEventListener('DOMContentLoaded', () => {
-      const url = './a.pdf?v=' + Math.random();
+      const url = './buku-pdf?v=' + Math.random();
 
       pdfjsLib.getDocument(url).promise.then((pdfDoc_) => {
         pdfDoc = pdfDoc_;
@@ -178,16 +178,10 @@
         renderPage(pageNum);
       }).catch(err => {
         document.getElementById('loading-status').textContent = "Gagal memuat a.pdf";
-        console.error("Detail Error PDF.js:", err);
+        console.error("Detail Error:", err);
       });
     });
 
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
-          .then(reg => console.log('PWA Active!'))
-          .catch(err => console.error('SW Error:', err));
-      });
     }
   </script>
 </body>
