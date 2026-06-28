@@ -1,21 +1,17 @@
 {
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/buku-pdf",
+      "destination": "/a.pdf"
+    }
+  ],
   "headers": [
     {
-      "source": "/a.pdf",
+      "source": "/(.*)",
       "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        },
-        {
-          "key": "Content-Type",
-          "value": "application/pdf"
-        },
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS" }
       ]
     }
   ]
